@@ -33,7 +33,7 @@ class ScreenCatcher(commands.Cog):
         guild = ctx.message.guild
         global gamestart
         embed = discord.Embed(
-            description="New game has been created\ndo %join in order to join",
+            description="New game has been created\nPlease write %join to join",
             colour=discord.Colour.blue()
         )
         await ctx.send(embed=embed)
@@ -52,7 +52,7 @@ class ScreenCatcher(commands.Cog):
                 condition = False
                 try:
                     if loader["game"][user_name] == user_id:
-                        await ctx.send("You have already joined a game")
+                        await ctx.message.author.send()
                         condition = False
                 except:
                     condition = True
@@ -76,6 +76,7 @@ class ScreenCatcher(commands.Cog):
                     colour=discord.Colour.blue()
                 )
                 await ctx.send(embed=embed)
+            await ctx.message.delete()
         else:
             await ctx.send("You must start a new game ``%newgame``")
 
@@ -87,7 +88,10 @@ class ScreenCatcher(commands.Cog):
                 loader = json.load(f)
             user_name = ctx.message.author.name
             if loader["game"][user_name]["Alive"]:
-                await ctx.send("Don't leave you're still alive!")
+                await ctx.message.author.send(embed=discord.Embed(
+                    description="You're still Alive, you can't leave yet",
+                    colour=discord.Colour.blue()
+                ))
             else:
                 loader["game"].pop(user_name, None)
                 open("users.json", "w").write(
@@ -105,8 +109,11 @@ class ScreenCatcher(commands.Cog):
     async def Start_Game(self, ctx):
         with open('users.json', 'r') as f:
             loader = json.load(f)
-        if len(loader["game"]) < 4:
-            await ctx.send("Cannot start the game, 4 minimum")
+        if len(loader["game"]) < 1:
+            await ctx.send(embed=discord.Embed(
+                description="Minimum of 4 people are required to start a game",
+                colour=discord.Colour.blue()
+            ))
         else:
             channel = ctx.message.author.voice.channel
             global gamestart
@@ -152,8 +159,15 @@ class ScreenCatcher(commands.Cog):
     async def dead(self, ctx):
         global roundstart
         if not roundstart:
-            await ctx.send("Game did not start yet!")
+            await ctx.send(embed=discord.Embed(
+                description="Game did not start yet",
+                colour=discord.Colour.blue()
+            ))
         else:
+            user_id = ctx.message.author.id
+            global guild
+            member = guild.get_member(user_id)
+            member.edit(mute=True)
             with open('users.json', 'r') as f:
                 loader = json.load(f)
             if loader["game"][ctx.message.author.display_name]["Alive"]:
@@ -179,19 +193,18 @@ async def Start():
     VictoryHash = imagehash.average_hash(Image.open('Images/Victory.png'))
     DefeatHash = imagehash.average_hash(Image.open('Images/Defeat.png'))
     while True:
-        await asyncio.sleep(1)
         myScreenshot = pyautogui.screenshot()
         hash = imagehash.average_hash(myScreenshot)
 
         # StartGame:
-        print(hash - ShhHash)
-        if hash - ShhHash < 9:
+        if hash - ShhHash < 4:
             await MuteJoined()
             print("Game has began")
         # End---
 
         # Discuss:
         if hash - DiscussHash < 10 or hash - EmergencyHash < 10:
+            print(hash - EmergencyHash)
             print("Started Discussion")
             await UnmuteAlive()
             await asyncio.sleep(2)
@@ -260,7 +273,8 @@ def resurrect():
     with open('users.json', 'r') as f:
         loader = json.load(f)
     for i in loader["game"]:
-        loader[i]["Alive"] = True
+        if not loader[i]["Alive"]:
+            loader[i]["Alive"] = True
 
     open("users.json", "w").write(
         json.dumps(loader, sort_keys=True, indent=4, separators=(',', ': '))
