@@ -18,8 +18,7 @@ roundstart = False
 global guild
 guild = ""
 
-global loop
-loop = asyncio.get_event_loop()
+event_loop = None
 
 
 class ScreenCatcher(commands.Cog):
@@ -86,8 +85,9 @@ class ScreenCatcher(commands.Cog):
         if gamestart:
             with open('users.json', 'r') as f:
                 loader = json.load(f)
-            user_name = ctx.message.author.name
-            if loader["game"][user_name]["Alive"]:
+            user_name = ctx.message.author.display_name
+            global roundstart
+            if loader["game"][user_name]["Alive"] and roundstart:
                 await ctx.message.author.send(embed=discord.Embed(
                     description="You're still Alive, you can't leave yet",
                     colour=discord.Colour.blue()
@@ -120,16 +120,16 @@ class ScreenCatcher(commands.Cog):
             if gamestart:
                 global roundstart
                 roundstart = True
-                asyncio.run_coroutine_threadsafe(await Start(), loop)
+                self.client.loop.create_task(Start())
             else:
                 await ctx.send("You must start a new game ``%newgame`` in order to start")
 
-
-    @commands.command(aliases=["listjoined"])
+    @commands.command(aliases=["status"])
     async def list_player(self, ctx):
         global gamestart
         if gamestart:
             sentence = ""
+            s = "No One joined yet"
             with open('users.json', 'r') as f:
                 data = json.load(f)
             count = 1
@@ -193,6 +193,7 @@ async def Start():
     VictoryHash = imagehash.average_hash(Image.open('Images/Victory.png'))
     DefeatHash = imagehash.average_hash(Image.open('Images/Defeat.png'))
     while True:
+        await asyncio.sleep(1)
         myScreenshot = pyautogui.screenshot()
         hash = imagehash.average_hash(myScreenshot)
 
@@ -203,7 +204,7 @@ async def Start():
         # End---
 
         # Discuss:
-        if hash - DiscussHash < 10 or hash - EmergencyHash < 10:
+        if hash - DiscussHash < 10 or hash - EmergencyHash < 6:
             print(hash - EmergencyHash)
             print("Started Discussion")
             await UnmuteAlive()
