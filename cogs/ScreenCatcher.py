@@ -1,6 +1,7 @@
 import json
 import time
-
+import threading
+import asyncio
 import discord
 from discord.ext import commands
 import pytesseract
@@ -11,7 +12,14 @@ from PIL import Image
 global gamestart
 gamestart = False
 
+global roundstart
+roundstart = False
 
+global guild
+guild = ""
+
+global loop
+loop = asyncio.get_event_loop()
 
 
 class ScreenCatcher(commands.Cog):
@@ -21,6 +29,8 @@ class ScreenCatcher(commands.Cog):
 
     @commands.command()
     async def newgame(self, ctx):
+        global guild
+        guild = ctx.message.guild
         global gamestart
         embed = discord.Embed(
             description="New game has been created\ndo %join in order to join",
@@ -31,101 +41,227 @@ class ScreenCatcher(commands.Cog):
 
     @commands.command()
     async def join(self, ctx):
-        with open('users.json', 'r') as f:
-            loader = json.load(f)
-        if loader["game"].length <= 10:
-            author = ctx.message.author
-            user_name = author.name
-            user_id = author.id
-            loader["game"][user_name] = user_id
-            embed = discord.Embed(
-                description="You have successfully joined the game!",
-                colour=discord.Colour.blue()
-            )
-            await author.send(embed=embed)
+        global gamestart
+        if gamestart:
+            with open('users.json', 'r') as f:
+                loader = json.load(f)
+            if len(loader["game"]) <= 10:
+                author = ctx.message.author
+                user_name = author.display_name
+                user_id = author.id
+                condition = False
+                try:
+                    if loader["game"][user_name] == user_id:
+                        await ctx.send("You have already joined a game")
+                        condition = False
+                except:
+                    condition = True
+                    pass
+                if condition:
+                    loader["game"][user_name] = {
+                        "id": user_id,
+                        "Alive": True
+                    }
+                    embed = discord.Embed(
+                        description="You have successfully joined the game!",
+                        colour=discord.Colour.blue()
+                    )
+                    await author.send(embed=embed)
+                    open("users.json", "w").write(
+                        json.dumps(loader, sort_keys=True, indent=4, separators=(',', ': '))
+                    )
+            else:
+                embed = discord.Embed(
+                    description="There are already 10 people in the game!",
+                    colour=discord.Colour.blue()
+                )
+                await ctx.send(embed=embed)
         else:
-            embed = discord.Embed(
-                description="There are already 10 people in the game!",
-                colour=discord.Colour.blue()
-            )
-            await ctx.send(embed=embed)
+            await ctx.send("You must start a new game ``%newgame``")
 
     @commands.command()
     async def leave(self, ctx):
-        with open('users.json', 'r') as f:
-            loader = json.load(f)
-        user_name = await ctx.message.author.name
-        loader["game"].pop(user_name, None)
-        with open('users.json', 'w') as f:
-            json.dump(loader, f)
+        global gamestart
+        if gamestart:
+            with open('users.json', 'r') as f:
+                loader = json.load(f)
+            user_name = ctx.message.author.name
+            if loader["game"][user_name]["Alive"]:
+                await ctx.send("Don't leave you're still alive!")
+            else:
+                loader["game"].pop(user_name, None)
+                open("users.json", "w").write(
+                    json.dumps(loader, sort_keys=True, indent=4, separators=(',', ': '))
+                )
+                await ctx.send(ctx.message.author.mention + " Has left the game!")
+        else:
+            await ctx.send("You must start a new game ``%newgame``")
 
     @leave.error
     async def leave_error(self, ctx, error):
-        embed = discord.Embed(
-            description="You cannot leave a game you did not join",
-            colour=discord.Colour.red()
-        )
-        await ctx.message.author.send(embed=embed)
+        await ctx.send("You cannot leave a game you did not join")
 
     @commands.command(aliases=['startgame'])
     async def Start_Game(self, ctx):
-        channel = ctx.message.author.voice.channel
+        with open('users.json', 'r') as f:
+            loader = json.load(f)
+        if len(loader["game"]) < 4:
+            await ctx.send("Cannot start the game, 4 minimum")
+        else:
+            channel = ctx.message.author.voice.channel
+            global gamestart
+            if gamestart:
+                global roundstart
+                roundstart = True
+                asyncio.run_coroutine_threadsafe(await Start(), loop)
+            else:
+                await ctx.send("You must start a new game ``%newgame`` in order to start")
+
+
+    @commands.command(aliases=["listjoined"])
+    async def list_player(self, ctx):
         global gamestart
         if gamestart:
-            Start()
+            sentence = ""
+            with open('users.json', 'r') as f:
+                data = json.load(f)
+            count = 1
+            for i in data["game"]:
+                sentence += str(count) + ". " + i
+                global roundstart
+                if roundstart:
+                    if data["game"][i]["Alive"]:
+                        sentence += " (Status - Alive)\n"
+                    else:
+                        sentence += " (Status - Dead)\n"
+                    s = "Round In Progress"
+                else:
+                    sentence += "\n"
+                    s = "Round Haven't Started"
+                count += 1
+            embed = discord.Embed(
+                title=s,
+                description=sentence,
+                colour=discord.Colour.blue()
+            )
+            await ctx.send(embed=embed)
         else:
-            await ctx.send("You must start a new game before being able to start the round")
+            await ctx.send("Sorry, there is no game open, you can do so by typing %newgame")
 
-    @Start_Game.error
-    async def Start_Game_error(self, ctx, error):
-        await ctx.send("You must be connected to the channel!")
+    @commands.command()
+    async def dead(self, ctx):
+        global roundstart
+        if not roundstart:
+            await ctx.send("Game did not start yet!")
+        else:
+            with open('users.json', 'r') as f:
+                loader = json.load(f)
+            if loader["game"][ctx.message.author.display_name]["Alive"]:
+                loader["game"][ctx.message.author.display_name]["Alive"] = False
+                open("users.json", "w").write(
+                    json.dumps(loader, sort_keys=True, indent=4, separators=(',', ': '))
+                )
+                await ctx.send(ctx.message.author.mention + " died, " + str(CheckLeft()) + " Are left")
+            else:
+                await ctx.send("You are already dead!")
 
 
 def setup(client):
     client.add_cog(ScreenCatcher(client))
 
 
-def Start():
+async def Start():
     pytesseract.pytesseract.tesseract_cmd = 'Tesseract-OCR/tesseract.exe'
+    print("sequence started, enjoy!")
+    ShhHash = imagehash.average_hash(Image.open('Images/Shhh.png'))
+    DiscussHash = imagehash.average_hash(Image.open('Images/discuss.png'))
+    EmergencyHash = imagehash.average_hash(Image.open('Images/Emergency.png'))
+    VictoryHash = imagehash.average_hash(Image.open('Images/Victory.png'))
+    DefeatHash = imagehash.average_hash(Image.open('Images/Defeat.png'))
     while True:
-        time.sleep(1)
+        await asyncio.sleep(1)
         myScreenshot = pyautogui.screenshot()
         hash = imagehash.average_hash(myScreenshot)
 
-        # Crewmate Alert
-        otherhash = imagehash.average_hash(Image.open('Images/CrewmatePicked.png'))
-        if hash - otherhash < 5:
-            print("You are Crewmate")
-        # End-------
+        # StartGame:
+        print(hash - ShhHash)
+        if hash - ShhHash < 9:
+            await MuteJoined()
+            print("Game has began")
+        # End---
 
-        # Impostor Alert
-        otherhash = imagehash.average_hash(Image.open('Images/Impostor.png'))
-        if hash - otherhash < 5:
-            print("You are Impostor!")
-        # End-------
+        # Discuss:
+        if hash - DiscussHash < 10 or hash - EmergencyHash < 10:
+            print("Started Discussion")
+            await UnmuteAlive()
+            await asyncio.sleep(2)
+            SkeldHash = imagehash.average_hash(Image.open('Images/MapEjections/TheSkeldEjection.png'))
+            PolusHash = imagehash.average_hash(Image.open('Images/MapEjections/PolusEjection.png'))
+            MiraHash = imagehash.average_hash(Image.open('Images/MapEjections/MiraHQEjection.png'))
+            while True:
+                myScreenshot = pyautogui.screenshot()
+                hash = imagehash.average_hash(myScreenshot)
 
-        # Discuss Alert
-        otherhash = imagehash.average_hash(Image.open('Images/discuss.png'))
-        if hash - otherhash < 10:
-            print("Started Discussing")
-            time.sleep(2)
-            otherhash = imagehash.average_hash(Image.open('Images/vote.png'))
-            while hash - otherhash < 10:
-                time.sleep(1)
-                hash = imagehash.average_hash(pyautogui.screenshot())
-            print("Stopped Discussion")
-        # End-------
+                if hash - SkeldHash < 5 or hash - PolusHash < 5 or hash - MiraHash < 5:
+                    await MuteJoined()
+                    print("Stopped Discussion")
+                    break
+        # End---
 
-        # Victory Alert
-        otherhash = imagehash.average_hash(Image.open('Images/Victory.png'))
-        if hash - otherhash < 10:
-            print("You have won!")
+        # Victory/Defeat
+        if hash - VictoryHash < 5 or hash - DefeatHash < 5:
+            await UnmuteAll()
+            print("Game has ended")
+            global roundstart
+            roundstart = False
+            resurrect()
             break
-        # End--------
 
-        # Defeat Alert
-        otherhash = imagehash.average_hash(Image.open('Images/Defeat.png'))
-        if hash - otherhash < 10:
-            print("You have lost!")
-            break
-        # End--------
+
+async def MuteJoined():
+    with open('users.json', 'r') as f:
+        loader = json.load(f)
+    for i in loader["game"]:
+        global guild
+        user = guild.get_member(loader["game"][i]["id"])
+        await user.edit(mute=True)
+
+
+async def UnmuteAlive():
+    with open('users.json', 'r') as f:
+        loader = json.load(f)
+    for i in loader["game"]:
+        global guild
+        if loader["game"][i]["Alive"]:
+            user = guild.get_member(loader["game"][i]["id"])
+            await user.edit(mute=False)
+
+
+def CheckLeft():
+    with open('users.json', 'r') as f:
+        loader = json.load(f)
+    count = 0
+    for i in loader["game"]:
+        if loader["game"][i]["Alive"]:
+            count += 1
+    return count
+
+
+async def UnmuteAll():
+    with open('users.json', 'r') as f:
+        loader = json.load(f)
+    global guild
+    for i in loader["game"]:
+        user = guild.get_member(loader["game"][i]["id"])
+        await user.edit(mute=False)
+
+
+def resurrect():
+    with open('users.json', 'r') as f:
+        loader = json.load(f)
+    for i in loader["game"]:
+        loader[i]["Alive"] = True
+
+    open("users.json", "w").write(
+        json.dumps(loader, sort_keys=True, indent=4, separators=(',', ': '))
+    )
